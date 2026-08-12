@@ -11,6 +11,12 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 os.environ["PYTHONPATH"] = root_dir + os.pathsep + os.environ.get("PYTHONPATH", "")
 
+# Ensure UTF-8 output encoding for Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import uvicorn
 
 def main():

@@ -10,7 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
     showCam: true,
     showBbox: true,
     activeTab: 'findings',
-    demoActive: false
+    demoActive: false,
+    viewMode: '2d', // '2d' or '3d'
+    preset3D: 'brain', // 'brain', 'hemorrhage', 'bone'
+    sliceZDepth: 50 // 0 to 100 %
   };
 
   // DOM Elements
@@ -23,12 +26,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('dicomCanvas');
   const ctx = canvas.getContext('2d');
   
+  const threeContainer = document.getElementById('threeCanvasContainer');
+  const btnMode2D = document.getElementById('btnMode2D');
+  const btnMode3D = document.getElementById('btnMode3D');
+  const toolbar2D = document.getElementById('toolbar2D');
+  const toolbar3D = document.getElementById('toolbar3D');
+  
   const btnWindowBrain = document.getElementById('btnWindowBrain');
   const btnWindowSubdural = document.getElementById('btnWindowSubdural');
   const btnWindowBone = document.getElementById('btnWindowBone');
   const btnToggleCam = document.getElementById('btnToggleCam');
   const btnToggleBbox = document.getElementById('btnToggleBbox');
   const btnRunAnalysis = document.getElementById('btnRunAnalysis');
+
+  const btn3DPresetBrain = document.getElementById('btn3DPresetBrain');
+  const btn3DPresetHemorrhage = document.getElementById('btn3DPresetHemorrhage');
+  const btn3DPresetBone = document.getElementById('btn3DPresetBone');
+  const btn3DResetCam = document.getElementById('btn3DResetCam');
+  
+  const sliceSliderWrapper = document.getElementById('sliceSliderWrapper');
+  const sliceDepthSlider = document.getElementById('sliceDepthSlider');
+  const sliceDepthVal = document.getElementById('sliceDepthVal');
+  const orbitHelpBadge = document.getElementById('orbitHelpBadge');
   
   const tabBtnFindings = document.getElementById('tabBtnFindings');
   const tabBtnReport = document.getElementById('tabBtnReport');
@@ -44,6 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const statTotalScans = document.getElementById('statTotalScans');
   const statHighUrgency = document.getElementById('statHighUrgency');
   const statAvgConfidence = document.getElementById('statAvgConfidence');
+
+  let threeEngine = null;
 
   // Initialize App
   initApp();
@@ -93,6 +114,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnLoadDemo.addEventListener('click', loadDemoScan);
+
+    // 2D / 3D View Mode Switcher
+    btnMode2D.addEventListener('click', () => setViewMode('2d'));
+    btnMode3D.addEventListener('click', () => setViewMode('3d'));
+
+    // 3D Density Presets
+    btn3DPresetBrain.addEventListener('click', () => set3DPreset('brain'));
+    btn3DPresetHemorrhage.addEventListener('click', () => set3DPreset('hemorrhage'));
+    btn3DPresetBone.addEventListener('click', () => set3DPreset('bone'));
+    btn3DResetCam.addEventListener('click', () => {
+      if (threeEngine) threeEngine.resetCamera();
+    });
+
+    // 3D Slice Depth Slider
+    sliceDepthSlider.addEventListener('input', (e) => {
+      const val = e.target.value;
+      sliceDepthVal.textContent = `${val}%`;
+      state.sliceZDepth = parseInt(val, 10);
+      if (threeEngine) threeEngine.setSliceDepth(state.sliceZDepth);
+    });
 
     // Toolbar Window Presets
     btnWindowBrain.addEventListener('click', () => setWindowPreset('brain'));
@@ -372,7 +413,47 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSummaryStats();
   }
 
-  // Windowing Presets
+  // View Mode Switcher (2D Slice vs 3D Interactive Brain)
+  function setViewMode(mode) {
+    state.viewMode = mode;
+    btnMode2D.classList.toggle('active', mode === '2d');
+    btnMode3D.classList.toggle('active', mode === '3d');
+    
+    toolbar2D.style.display = mode === '2d' ? 'flex' : 'none';
+    toolbar3D.style.display = mode === '3d' ? 'flex' : 'none';
+    canvas.style.display = mode === '2d' ? 'block' : 'none';
+    threeContainer.style.display = mode === '3d' ? 'block' : 'none';
+    sliceSliderWrapper.style.display = mode === '3d' ? 'flex' : 'none';
+    orbitHelpBadge.style.display = mode === '3d' ? 'block' : 'none';
+
+    document.getElementById('infoViewMode').textContent = mode === '2d' ? '2D Slice' : '3D Interactive Brain';
+
+    if (mode === '3d') {
+      if (!threeEngine) {
+        threeEngine = new ThreeBrainEngine(threeContainer);
+        threeEngine.init();
+      } else {
+        threeEngine.onResize();
+      }
+      threeEngine.updateCTScanTexture(canvas, state.imageDataUrl);
+      if (state.currentAnalysis && state.currentAnalysis.decision_support) {
+        threeEngine.updateLesionFromFindings(state.currentAnalysis.decision_support.findings);
+      }
+    }
+  }
+
+  function set3DPreset(preset) {
+    state.preset3D = preset;
+    btn3DPresetBrain.classList.toggle('active', preset === 'brain');
+    btn3DPresetHemorrhage.classList.toggle('active', preset === 'hemorrhage');
+    btn3DPresetBone.classList.toggle('active', preset === 'bone');
+
+    if (threeEngine) {
+      threeEngine.setPreset(preset);
+    }
+  }
+
+  // Windowing Presets (2D)
   async function setWindowPreset(preset) {
     state.windowPreset = preset;
     btnWindowBrain.classList.toggle('active', preset === 'brain');
@@ -399,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Canvas Rendering (Real DICOM image + Grad-CAM Heatmap + Overlays)
   function renderCanvas() {
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = '#050811';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (state.imageDataUrl) {
@@ -407,40 +488,108 @@ document.addEventListener('DOMContentLoaded', () => {
       img.onload = () => {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         drawOverlays();
+        if (threeEngine) {
+          threeEngine.updateCTScanTexture(canvas, state.imageDataUrl);
+        }
       };
       img.src = state.imageDataUrl;
     } else {
       drawBrainCTSimulation();
       drawOverlays();
+      if (threeEngine) {
+        threeEngine.updateCTScanTexture(canvas, null);
+      }
+    }
+
+    if (state.viewMode === '3d') {
+      if (threeEngine) {
+        threeEngine.onResize();
+        if (state.currentAnalysis && state.currentAnalysis.decision_support) {
+          threeEngine.updateLesionFromFindings(state.currentAnalysis.decision_support.findings);
+        }
+      }
     }
 
     document.getElementById('infoStudyId').textContent = state.selectedScanId || 'No scan selected';
     document.getElementById('infoOverlayState').textContent = `${state.showCam ? 'Grad-CAM ' : ''}${state.showBbox ? '+ BBox' : ''}` || 'Off';
   }
 
+  // Realistic Non-Contrast Brain CT Slice Generator (Anatomically Detailed)
   function drawBrainCTSimulation() {
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
     const rx = 180;
     const ry = 220;
 
-    // Skull Bone Ring
+    // 1. Dark Air Background
+    ctx.fillStyle = '#03050a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. High-Density Skull Bone Ring (Outer Cortex + Diploë Space)
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = state.windowPreset === 'bone' ? '#ffffff' : '#b0b0b0';
+    ctx.fillStyle = state.windowPreset === 'bone' ? '#ffffff' : '#d1d5db';
     ctx.fill();
 
-    // Brain Tissue Inner Ring
     ctx.beginPath();
-    ctx.ellipse(cx, cy, rx - 16, ry - 16, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = state.windowPreset === 'subdural' ? '#4a5568' : '#2d3748';
+    ctx.ellipse(cx, cy, rx - 6, ry - 6, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = state.windowPreset === 'bone' ? '#94a3b8' : '#64748b';
     ctx.fill();
 
-    // Ventricles
+    // 3. Inner Skull Table
     ctx.beginPath();
-    ctx.ellipse(cx - 20, cy - 10, 10, 45, -0.1, 0, 2 * Math.PI);
-    ctx.ellipse(cx + 20, cy - 10, 10, 45, 0.1, 0, 2 * Math.PI);
-    ctx.fillStyle = '#000000';
+    ctx.ellipse(cx, cy, rx - 14, ry - 14, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = state.windowPreset === 'bone' ? '#ffffff' : '#e2e8f0';
+    ctx.fill();
+
+    // 4. Brain Parenchyma (Gray/White Matter Soft Tissue HU Density)
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx - 18, ry - 18, 0, 0, 2 * Math.PI);
+    
+    const brainGrad = ctx.createRadialGradient(cx, cy, 20, cx, cy, rx - 18);
+    if (state.windowPreset === 'brain') {
+      brainGrad.addColorStop(0, '#475569');   // Deep subcortical white matter (HU ~30)
+      brainGrad.addColorStop(0.7, '#334155'); // Cerebral cortex gray matter (HU ~40)
+      brainGrad.addColorStop(1, '#1e293b');   // Subarachnoid space / CSF
+    } else if (state.windowPreset === 'subdural') {
+      brainGrad.addColorStop(0, '#334155');
+      brainGrad.addColorStop(0.8, '#1e293b');
+      brainGrad.addColorStop(1, '#0f172a');
+    } else {
+      brainGrad.addColorStop(0, '#1e293b');
+      brainGrad.addColorStop(1, '#020617');
+    }
+    ctx.fillStyle = brainGrad;
+    ctx.fill();
+
+    // 5. Interhemispheric Fissure & Sulci Lines
+    ctx.strokeStyle = state.windowPreset === 'subdural' ? '#0f172a' : '#1e293b';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - ry + 22);
+    ctx.lineTo(cx, cy + ry - 22);
+    ctx.stroke();
+
+    // Cortical Sulci Convolution Swirls
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+      const sx = cx + Math.cos(angle) * (rx - 45);
+      const sy = cy + Math.sin(angle) * (ry - 45);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 18, angle, angle + Math.PI / 2);
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+
+    // 6. Lateral Ventricles (Frontal & Occipital Horns - Hypodense CSF)
+    ctx.fillStyle = '#030712';
+    // Left Ventricle
+    ctx.beginPath();
+    ctx.ellipse(cx - 24, cy - 12, 10, 48, -0.15, 0, 2 * Math.PI);
+    ctx.fill();
+    // Right Ventricle
+    ctx.beginPath();
+    ctx.ellipse(cx + 24, cy - 12, 10, 48, 0.15, 0, 2 * Math.PI);
     ctx.fill();
   }
 
@@ -585,5 +734,310 @@ document.addEventListener('DOMContentLoaded', () => {
     a.download = fileName;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  // 3D WebGL Brain Engine (Three.js + Orbit Controls + Z-Slice Clipping + HU Density Presets)
+  class ThreeBrainEngine {
+    constructor(containerEl) {
+      this.container = containerEl;
+      this.scene = null;
+      this.camera = null;
+      this.renderer = null;
+      this.controls = null;
+      this.brainGroup = null;
+      this.clippingPlane = null;
+      this.lesionMesh = null;
+      this.bboxMesh = null;
+      this.initialized = false;
+    }
+
+    init() {
+      if (this.initialized || typeof THREE === 'undefined') return;
+
+      this.scene = new THREE.Scene();
+      this.scene.background = new THREE.Color(0x050811);
+
+      const width = this.container.clientWidth || 512;
+      const height = this.container.clientHeight || 512;
+
+      this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+      this.camera.position.set(0, 110, 210);
+
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, localClippingEnabled: true });
+      this.renderer.setSize(width, height);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.shadowMap.enabled = true;
+      
+      this.container.innerHTML = '';
+      this.container.appendChild(this.renderer.domElement);
+
+      if (typeof THREE.OrbitControls !== 'undefined') {
+        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
+        this.controls.maxPolarAngle = Math.PI * 0.95;
+      }
+
+      // Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      this.scene.add(ambientLight);
+
+      const dirLight1 = new THREE.DirectionalLight(0x38bdf8, 1.2);
+      dirLight1.position.set(100, 150, 100);
+      this.scene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0x8b5cf6, 0.8);
+      dirLight2.position.set(-100, -100, -100);
+      this.scene.add(dirLight2);
+
+      // Z Clipping Plane for 3D Slice Cross-sectioning
+      this.clippingPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+      this.renderer.clippingPlanes = [this.clippingPlane];
+
+      this.buildBrainModel();
+      this.initialized = true;
+
+      window.addEventListener('resize', () => this.onResize());
+      this.animate();
+    }
+
+    buildBrainModel() {
+      if (this.brainGroup) this.scene.remove(this.brainGroup);
+      this.brainGroup = new THREE.Group();
+
+      // 1. Skull Shell (CT High Bone Density Window)
+      const skullGeo = new THREE.SphereGeometry(58, 64, 48);
+      skullGeo.scale(1.0, 1.15, 1.25);
+
+      this.skullMat = new THREE.MeshStandardMaterial({
+        color: 0xe2e8f0,
+        roughness: 0.3,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.18,
+        clippingPlanes: [this.clippingPlane],
+        side: THREE.DoubleSide
+      });
+      const skull = new THREE.Mesh(skullGeo, this.skullMat);
+      this.brainGroup.add(skull);
+
+      // Skull Bone Wireframe Outer Rim
+      const skullWireMat = new THREE.MeshBasicMaterial({
+        color: 0x64748b,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.08,
+        clippingPlanes: [this.clippingPlane]
+      });
+      const skullWire = new THREE.Mesh(skullGeo, skullWireMat);
+      this.brainGroup.add(skullWire);
+
+      // 2. Dual Brain Hemispheres (Left & Right)
+      const hemisphereGroup = new THREE.Group();
+
+      const hemiGeo = new THREE.SphereGeometry(44, 48, 36);
+      hemiGeo.scale(0.86, 1.06, 1.16);
+
+      this.brainTissueMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        roughness: 0.4,
+        metalness: 0.15,
+        transparent: true,
+        opacity: 0.65,
+        clippingPlanes: [this.clippingPlane],
+        side: THREE.DoubleSide
+      });
+
+      const leftHemi = new THREE.Mesh(hemiGeo, this.brainTissueMat);
+      leftHemi.position.set(-19, 0, 0);
+      hemisphereGroup.add(leftHemi);
+
+      const rightHemi = new THREE.Mesh(hemiGeo, this.brainTissueMat);
+      rightHemi.position.set(19, 0, 0);
+      hemisphereGroup.add(rightHemi);
+
+      // 3. Brain Sulci/Gyri Cortex Surface Curvature (CT Density Particles)
+      const particlesCount = 3800;
+      const posArray = new Float32Array(particlesCount * 3);
+      const colorArray = new Float32Array(particlesCount * 3);
+
+      for (let i = 0; i < particlesCount; i++) {
+        const u = Math.random();
+        const v = Math.random();
+        const theta = u * 2.0 * Math.PI;
+        const phi = Math.acos(2.0 * v - 1.0);
+        const r = 43 + Math.sin(theta * 7) * Math.cos(phi * 7) * 3.5;
+
+        const x = r * Math.sin(phi) * Math.cos(theta) * 0.92;
+        const y = r * Math.sin(phi) * Math.sin(theta) * 1.08;
+        const z = r * Math.cos(phi) * 1.18;
+
+        posArray[i * 3] = x;
+        posArray[i * 3 + 1] = y;
+        posArray[i * 3 + 2] = z;
+
+        colorArray[i * 3] = 0.22;
+        colorArray[i * 3 + 1] = 0.74;
+        colorArray[i * 3 + 2] = 0.97;
+      }
+
+      const pGeo = new THREE.BufferGeometry();
+      pGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+      pGeo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+
+      const pMat = new THREE.PointsMaterial({
+        size: 2.2,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.75,
+        clippingPlanes: [this.clippingPlane]
+      });
+
+      const cortexParticles = new THREE.Points(pGeo, pMat);
+      hemisphereGroup.add(cortexParticles);
+
+      // 4. Ventricles (Hypodense CSF Cavities)
+      const ventricleGeo = new THREE.TorusGeometry(15, 4.5, 16, 32);
+      const ventricleMat = new THREE.MeshBasicMaterial({
+        color: 0x050811,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.45,
+        clippingPlanes: [this.clippingPlane]
+      });
+      const ventricles = new THREE.Mesh(ventricleGeo, ventricleMat);
+      ventricles.rotation.x = Math.PI / 2;
+      hemisphereGroup.add(ventricles);
+
+      // 5. 3D CT Scan Image Slice Mesh (Mapped directly inside 3D Brain Space)
+      const slicePlaneGeo = new THREE.PlaneGeometry(105, 105);
+      this.slicePlaneMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.95
+      });
+      this.ctSlicePlaneMesh = new THREE.Mesh(slicePlaneGeo, this.slicePlaneMat);
+      this.ctSlicePlaneMesh.position.set(0, 0, 0);
+      this.brainGroup.add(this.ctSlicePlaneMesh);
+
+      // 6. Lesion Hyperdensity Volume & Glowing 3D Bounding Box
+      const lesionGeo = new THREE.SphereGeometry(15, 32, 24);
+      lesionGeo.scale(1.25, 0.85, 1.05);
+
+      this.lesionMat = new THREE.MeshStandardMaterial({
+        color: 0xf43f5e,
+        emissive: 0xf43f5e,
+        emissiveIntensity: 0.9,
+        roughness: 0.2,
+        transparent: true,
+        opacity: 0.85,
+        clippingPlanes: [this.clippingPlane]
+      });
+      this.lesionMesh = new THREE.Mesh(lesionGeo, this.lesionMat);
+      this.lesionMesh.position.set(22, 10, 15);
+      this.brainGroup.add(this.lesionMesh);
+
+      // 3D Wireframe Bounding Box
+      const bboxGeo = new THREE.BoxGeometry(34, 28, 30);
+      const bboxMat = new THREE.MeshBasicMaterial({
+        color: 0xf43f5e,
+        wireframe: true,
+        clippingPlanes: [this.clippingPlane]
+      });
+      this.bboxMesh = new THREE.Mesh(bboxGeo, this.bboxMat);
+      this.bboxMesh.position.copy(this.lesionMesh.position);
+      this.brainGroup.add(this.bboxMesh);
+
+      this.scene.add(this.brainGroup);
+    }
+
+    updateCTScanTexture(canvasEl, dataUrl) {
+      if (!this.initialized || !this.slicePlaneMat) return;
+
+      if (dataUrl) {
+        new THREE.TextureLoader().load(dataUrl, (tex) => {
+          tex.needsUpdate = true;
+          this.slicePlaneMat.map = tex;
+          this.slicePlaneMat.needsUpdate = true;
+        });
+      } else if (canvasEl) {
+        const tex = new THREE.CanvasTexture(canvasEl);
+        tex.needsUpdate = true;
+        this.slicePlaneMat.map = tex;
+        this.slicePlaneMat.needsUpdate = true;
+      }
+    }
+
+    updateLesionFromFindings(findings) {
+      if (!this.initialized || !findings || findings.length === 0) return;
+
+      const lesionFinding = findings.find(f => f.label !== 'any' && f.bounding_box);
+      if (lesionFinding && lesionFinding.bounding_box) {
+        const [bx, by, bw, bh] = lesionFinding.bounding_box;
+        const posX = ((bx + bw / 2) / 256 - 0.5) * 70;
+        const posY = -((by + bh / 2) / 256 - 0.5) * 80;
+        const posZ = 15;
+
+        this.lesionMesh.position.set(posX, posY, posZ);
+        this.bboxMesh.position.set(posX, posY, posZ);
+        this.lesionMesh.visible = true;
+        this.bboxMesh.visible = true;
+      }
+    }
+
+    setPreset(preset) {
+      if (!this.initialized) return;
+      if (preset === 'brain') {
+        this.skullMat.opacity = 0.18;
+        this.brainTissueMat.opacity = 0.65;
+        this.brainTissueMat.color.setHex(0x38bdf8);
+        this.lesionMat.opacity = 0.85;
+      } else if (preset === 'hemorrhage') {
+        this.skullMat.opacity = 0.05;
+        this.brainTissueMat.opacity = 0.2;
+        this.brainTissueMat.color.setHex(0x3b82f6);
+        this.lesionMat.opacity = 1.0;
+        this.lesionMat.emissiveIntensity = 1.6;
+      } else if (preset === 'bone') {
+        this.skullMat.opacity = 0.85;
+        this.skullMat.color.setHex(0xf8fafc);
+        this.brainTissueMat.opacity = 0.1;
+        this.lesionMat.opacity = 0.5;
+      }
+    }
+
+    setSliceDepth(percent) {
+      if (!this.initialized) return;
+      const zOffset = ((percent / 100) - 0.5) * 140;
+      this.clippingPlane.constant = zOffset;
+      if (this.ctSlicePlaneMesh) {
+        this.ctSlicePlaneMesh.position.z = zOffset;
+      }
+    }
+
+    resetCamera() {
+      if (!this.initialized) return;
+      this.camera.position.set(0, 110, 210);
+      if (this.controls) this.controls.reset();
+    }
+
+    onResize() {
+      if (!this.initialized) return;
+      const width = this.container.clientWidth;
+      const height = this.container.clientHeight;
+      if (width === 0 || height === 0) return;
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(width, height);
+    }
+
+    animate() {
+      requestAnimationFrame(() => this.animate());
+      if (this.controls) this.controls.update();
+      if (this.renderer && this.scene && this.camera) {
+        this.renderer.render(this.scene, this.camera);
+      }
+    }
   }
 });
