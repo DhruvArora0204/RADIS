@@ -1,0 +1,15 @@
+pydicom
+numpy
+pandas
+torch
+torchvision
+monai
+scikit-learn
+pytest
+opencv-python-headless
+matplotlib
+pydantic
+fastapi
+uvicorn
+python-multipart
+httpx
