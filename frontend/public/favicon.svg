@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Outer circle (Main Gantry) -->
+  <circle cx="50" cy="42" r="38" fill="none" stroke="#000" stroke-width="8"/>
+  
+  <!-- Inner bore -->
+  <circle cx="50" cy="42" r="22" fill="none" stroke="#000" stroke-width="8"/>
+  
+  <!-- Top indentation detail -->
+  <path d="M 40,8 L 60,8 L 56,16 L 44,16 Z" fill="#000"/>
+  
+  <!-- Left Side Buttons -->
+  <circle cx="15" cy="42" r="4" fill="#000"/>
+  <rect x="11" y="52" width="8" height="4" rx="2" fill="#000"/>
+  
+  <!-- Right Side Buttons -->
+  <circle cx="85" cy="42" r="4" fill="#000"/>
+  <rect x="81" y="52" width="8" height="4" rx="2" fill="#000"/>
+  
+  <!-- Bottom Side Loops/Base -->
+  <path d="M 14,54 C 14,80 20,86 35,86" fill="none" stroke="#000" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 86,54 C 86,80 80,86 65,86" fill="none" stroke="#000" stroke-width="6" stroke-linecap="round"/>
+  
+  <!-- Patient Bed Base -->
+  <path d="M 36,46 L 64,46 L 74,96 L 26,96 Z" fill="#fff" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
+  
+  <!-- Bed Headrest -->
+  <path d="M 42,42 C 42,38 58,38 58,42 L 58,46 L 42,46 Z" fill="#fff" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
+  
+  <!-- Horizontal line on bed -->
+  <line x1="30" y1="84" x2="70" y2="84" stroke="#000" stroke-width="6"/>
+</svg>

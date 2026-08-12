@@ -41,7 +41,7 @@ def favicon():
 app.include_router(api_router, prefix="/api/v1")
 
 # Mount frontend static files
-frontend_dir = os.path.join(os.getcwd(), "frontend")
+frontend_dir = os.path.join(os.getcwd(), "frontend", "dist")
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
